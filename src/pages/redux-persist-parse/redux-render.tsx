@@ -1,70 +1,67 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState } from "react"
 
 // 递归解析 redux-persist 格式的数据
 function parseReduxPersistData(data: unknown): unknown {
   if (typeof data === "string") {
     // 尝试解析字符串化的 JSON
     try {
-      const parsed = JSON.parse(data);
-      return parseReduxPersistData(parsed);
+      const parsed = JSON.parse(data)
+      return parseReduxPersistData(parsed)
     } catch {
       // 不是 JSON 字符串，返回原值
-      return data;
+      return data
     }
   }
 
   if (Array.isArray(data)) {
-    return data.map(parseReduxPersistData);
+    return data.map(parseReduxPersistData)
   }
 
   if (data !== null && typeof data === "object") {
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(data)) {
       // 可以选择过滤掉 _persist 字段
       // if (key === '_persist') continue;
-      result[key] = parseReduxPersistData(value);
+      result[key] = parseReduxPersistData(value)
     }
-    return result;
+    return result
   }
 
-  return data;
+  return data
 }
 
 export function ReduxPersistFileReader() {
-  const [fileName, setFileName] = useState<string>("");
+  const [fileName, setFileName] = useState<string>("")
 
-  const handleFileChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
+  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
 
-      setFileName(file.name);
+    setFileName(file.name)
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const content = e.target?.result as string;
-          const rawData = JSON.parse(content);
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string
+        const rawData = JSON.parse(content)
 
-          console.log("=== 原始数据 ===");
-          console.log(rawData);
+        console.log("=== 原始数据 ===")
+        console.log(rawData)
 
-          const parsedData = parseReduxPersistData(rawData);
+        const parsedData = parseReduxPersistData(rawData)
 
-          console.log("=== 解析后的数据 ===");
-          console.log(parsedData);
-        } catch (error) {
-          console.error("解析 JSON 文件失败:", error);
-        }
-      };
+        console.log("=== 解析后的数据 ===")
+        console.log(parsedData)
+      } catch (error) {
+        console.error("解析 JSON 文件失败:", error)
+      }
+    }
 
-      reader.readAsText(file);
+    reader.readAsText(file)
 
-      // 清空 input 值，允许重新选择相同文件
-      event.target.value = "";
-    },
-    []
-  );
+    // 清空 input 值，允许重新选择相同文件
+    event.target.value = ""
+  }, [])
 
   return (
     <div style={{ padding: 20 }}>
@@ -86,11 +83,7 @@ export function ReduxPersistFileReader() {
           style={{ display: "none" }}
         />
       </label>
-      {fileName && (
-        <span style={{ marginLeft: 12, color: "#666" }}>
-          已选择: {fileName}
-        </span>
-      )}
+      {fileName && <span style={{ marginLeft: 12, color: "#666" }}>已选择: {fileName}</span>}
     </div>
-  );
+  )
 }
