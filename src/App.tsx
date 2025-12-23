@@ -3,6 +3,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { AppSidebar } from "@/components/AppSidebar"
 import SoftwareUpgrade from "./pages/software-upgrade"
 import ReduxPersistParse from "./pages/redux-persist-parse"
+import DeviceDebug from "./pages/device-debug"
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
             <Route path="/" element={<Navigate to="/software-upgrade" replace />} />
             <Route path="/software-upgrade" element={<SoftwareUpgrade />} />
             <Route path="/redux-persist-parse" element={<ReduxPersistParse />} />
+            <Route path="/device-debug" element={<DeviceDebug />} />
           </Routes>
         </main>
       </SidebarInset>

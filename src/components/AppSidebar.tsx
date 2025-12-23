@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Database } from "lucide-react"
+import { ArrowUpCircle, Database, Bug } from "lucide-react"
 import { Link, useLocation } from "react-router"
 import {
   Sidebar,
@@ -22,6 +22,11 @@ const menuItems = [
     title: "Redux Persist Parse",
     path: "/redux-persist-parse",
     icon: Database,
+  },
+  {
+    title: "设备调试",
+    path: "/device-debug",
+    icon: Bug,
   },
 ]
 
