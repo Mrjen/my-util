@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select"
 import { useFirmwareUpgrade } from "./use-firmware-upgrade"
 import { STATUS_MESSAGES, type UpgradeStatus } from "./firmware-utils"
+import md5 from "md5"
 
 export default function SoftwareUpgrade() {
   const {
@@ -31,6 +32,7 @@ export default function SoftwareUpgrade() {
 
   const [firmwareFile, setFirmwareFile] = useState<File | null>(null)
   const [firmwareData, setFirmwareData] = useState<Uint8Array | null>(null)
+  const [firmwareMd5, setFirmwareMd5] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,7 +42,19 @@ export default function SoftwareUpgrade() {
     setFirmwareFile(file)
 
     const arrayBuffer = await file.arrayBuffer()
-    setFirmwareData(new Uint8Array(arrayBuffer))
+    const uint8Array = new Uint8Array(arrayBuffer)
+    setFirmwareData(uint8Array)
+
+    // 将二进制数据转换为十六进制字符串（参考用户的 hexView 逻辑）
+    let hexString = ""
+    for (const byteValue of uint8Array) {
+      if (hexString) hexString += " "
+      hexString += `00${byteValue.toString(16)}`.slice(-2).toUpperCase()
+    }
+
+    // 对十六进制字符串计算 MD5
+    const hash = md5(hexString)
+    setFirmwareMd5(hash.toUpperCase())
   }
 
   const handleEnterIAPMode = async () => {
@@ -127,6 +141,14 @@ export default function SoftwareUpgrade() {
             </span>
           )}
         </div>
+        {firmwareMd5 && (
+          <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded text-sm space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-muted-foreground">MD5:</span>
+              <code className="font-mono text-xs">{firmwareMd5}</code>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 升级操作区域 */}
