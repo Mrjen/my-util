@@ -235,6 +235,9 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
           const packet = createFirmwarePacket(chunkData)
           await sendFeatureReport(selectedDevice, packet)
 
+          // 每个包发送后延迟 15ms
+          await new Promise((resolve) => setTimeout(resolve, 15))
+
           const progressValue = Math.round(((i + 1) / chunks.length) * 100)
           setProgress(progressValue)
 
