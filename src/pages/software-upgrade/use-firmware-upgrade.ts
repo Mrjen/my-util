@@ -304,10 +304,11 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
           const response = await selectedDevice.receiveFeatureReport(SEND_REPORT_ID)
           const responseData = new Uint8Array(response.buffer)
           // 打印响应数据
-          const hexStr = Array.from(responseData.slice(0, 16))
+          const hexStr = Array.from(responseData.slice(0, 32))
             .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
             .join(" ")
           addLog("info", `设备响应: ${hexStr}...`)
+          console.log("Response:", hexStr)
 
           const parsed = parseCdromResponse(responseData)
           if (parsed.isValid) {
@@ -335,7 +336,7 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
           await sendFeatureReport(selectedDevice, packet)
 
           // 每包发送后延迟 15ms
-          await delay(15)
+          await delay(150)
 
           // 尝试读取响应确认
           try {
