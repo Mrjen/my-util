@@ -1,0 +1,55 @@
+# Change: 添加 CD-ROM 升级功能
+
+## Why
+
+当前软件升级页面仅支持固件（Firmware）升级，需要设备进入 IAP 模式并重新连接。用户需要一种更简便的升级方式来更新设备的 CD-ROM 数据，该升级不需要设备进入 IAP 模式，也不需要断开重连设备。
+
+## What Changes
+
+- 在软件升级页面添加"升级类型"选择器，支持"固件升级"和"CD-ROM 升级"两种模式
+- 新增 CD-ROM 升级协议实现：
+  - 命令 `0x73`: 发送 CD-ROM 总数据字节数
+  - 命令 `0x74`: 分包发送 CD-ROM 数据
+- CD-ROM 升级流程简化：
+  - 无需进入 IAP 模式
+  - 无需断开重连设备
+  - 直接选择文件并开始升级
+- 每包数据发送后延迟 15ms 并读取设备响应确认
+
+## Impact
+
+- Affected specs: `software-upgrade`
+- Affected code:
+  - `src/pages/software-upgrade/index.tsx` - 添加升级类型选择 UI
+  - `src/pages/software-upgrade/firmware-utils.ts` - 添加 CD-ROM 协议命令和数据包创建函数
+  - `src/pages/software-upgrade/use-firmware-upgrade.ts` - 添加 CD-ROM 升级逻辑（或创建新的 hook）
+
+## Protocol Reference (CD-ROM)
+
+### 1. 发送 CD-ROM 总数据字节数 (命令 0x73)
+
+```
+帧结构: [0xA5, 0x5A, 0xFC, 0x2E, 0x05, 0x73, Byte7~Byte10(总字节数), 0xFC, 0x5A, 0xA5, CRC16H, CRC16L]
+```
+
+示例（总大小 145408 字节）:
+```
+发送: 0xA5, 0x5A, 0xFC, 0x2E, 0x05, 0x73, 0x00, 0x38, 0x02, 0x00, 0xFC, 0x5A, 0xA5, 0xA9, 0x34
+响应: 0xA5, 0x5A, 0xFF, 0x2E, 0x05, 0x73, 0x00, 0x38, 0x02, 0x00, 0xFF, 0x5A, 0xA5, 0xED, 0xCB
+```
+
+### 2. 发送 CD-ROM 数据 (命令 0x74)
+
+```
+帧结构: [0xA5, 0x5A, 0xFC, 0x2E, 数据长度, 0x74, 数据内容, 0xFC, 0x5A, 0xA5, CRC16H, CRC16L]
+```
+
+- 一包 58 字节 + 1 个报告 ID，协议部分占 11 字节，有效数据 47 字节
+- 每包发送后延迟 15ms，然后读取设备响应
+- 设备返回当前接收的包数确认
+
+示例:
+```
+发送第一包: 0xA5, 0x5A, 0xFC, 0x2E, 0x30, 0x74, [47字节数据], 0xFC, 0x5A, 0xA5, CRC16H, CRC16L
+设备响应:   0xA5, 0x5A, 0xFF, 0x2E, 0x05, 0x74, 0x01, 0x00, 0x00, 0x00, 0xFF, 0x5A, 0xA5, CRC16H, CRC16L
+```

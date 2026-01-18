@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useFirmwareUpgrade } from "./use-firmware-upgrade"
-import { STATUS_MESSAGES, type UpgradeStatus } from "./firmware-utils"
+import { STATUS_MESSAGES, type UpgradeStatus, type UpgradeType } from "./firmware-utils"
 import md5 from "md5"
 
 export default function SoftwareUpgrade() {
@@ -25,15 +25,19 @@ export default function SoftwareUpgrade() {
     selectDevice,
     enterIAPMode,
     uploadFirmware,
+    uploadCdrom,
     clearLogs,
   } = useFirmwareUpgrade()
 
   const selectedDevice = selectedDeviceIndex >= 0 ? devices[selectedDeviceIndex] : null
 
+  const [upgradeType, setUpgradeType] = useState<UpgradeType>("firmware")
   const [firmwareFile, setFirmwareFile] = useState<File | null>(null)
   const [firmwareData, setFirmwareData] = useState<Uint8Array | null>(null)
   const [firmwareMd5, setFirmwareMd5] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const isCdromMode = upgradeType === "cdrom"
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -66,14 +70,39 @@ export default function SoftwareUpgrade() {
     await uploadFirmware(firmwareData)
   }
 
+  const handleUploadCdrom = async () => {
+    if (!firmwareData) return
+    await uploadCdrom(firmwareData)
+  }
+
   const isUpgrading = !["idle", "success", "error"].includes(status)
 
   const canEnterIAP = selectedDevice && !isUpgrading && !isInIAPMode
   const canUpload = selectedDevice && firmwareData && !isUpgrading && isInIAPMode
+  const canUploadCdrom = selectedDevice && firmwareData && !isUpgrading
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">固件升级</h1>
+      <h1 className="text-2xl font-bold">软件升级</h1>
+
+      {/* 升级类型选择 */}
+      <div className="p-4 border rounded-lg space-y-4">
+        <h2 className="font-semibold">升级类型</h2>
+        <Select value={upgradeType} onValueChange={(v) => setUpgradeType(v as UpgradeType)}>
+          <SelectTrigger className="w-64">
+            <SelectValue placeholder="选择升级类型" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="firmware">固件升级</SelectItem>
+            <SelectItem value="cdrom">CD-ROM 升级</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {isCdromMode
+            ? "CD-ROM 升级无需进入 IAP 模式，可直接升级"
+            : "固件升级需要先进入 IAP 模式，设备会断开重连"}
+        </p>
+      </div>
 
       {/* 设备连接区域 */}
       <div className="p-4 border rounded-lg space-y-4">
@@ -121,9 +150,9 @@ export default function SoftwareUpgrade() {
         )}
       </div>
 
-      {/* 固件选择区域 */}
+      {/* 文件选择区域 */}
       <div className="p-4 border rounded-lg space-y-4">
-        <h2 className="font-semibold">2. 选择固件文件</h2>
+        <h2 className="font-semibold">2. 选择{isCdromMode ? "CD-ROM" : "固件"}文件</h2>
         <div className="flex items-center gap-4">
           <input
             ref={fileInputRef}
@@ -155,8 +184,8 @@ export default function SoftwareUpgrade() {
       <div className="p-4 border rounded-lg space-y-4">
         <h2 className="font-semibold">3. 升级操作</h2>
 
-        {/* IAP 模式状态提示 */}
-        {isInIAPMode && (
+        {/* IAP 模式状态提示 - 仅固件升级显示 */}
+        {!isCdromMode && isInIAPMode && (
           <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-sm">
             <p className="text-yellow-800 dark:text-yellow-200">
               设备已进入 IAP 模式，请重新连接设备后点击「写入固件」
@@ -164,27 +193,40 @@ export default function SoftwareUpgrade() {
           </div>
         )}
 
-        <div className="flex gap-4">
-          {/* 步骤 1: 进入 IAP 模式 */}
+        {isCdromMode ? (
+          /* CD-ROM 升级操作 */
           <div className="space-y-2">
-            <Button onClick={handleEnterIAPMode} disabled={!canEnterIAP} variant="outline">
-              {status === "entering_upgrade_mode" || status === "entering_iap_mode"
-                ? "进入中..."
-                : "进入 IAP 模式"}
+            <Button onClick={handleUploadCdrom} disabled={!canUploadCdrom}>
+              {status === "sending_cdrom_size" || status === "sending_cdrom_data"
+                ? "升级中..."
+                : "开始升级"}
             </Button>
-            <p className="text-xs text-muted-foreground">设备会断开重连</p>
+            <p className="text-xs text-muted-foreground">直接发送 CD-ROM 数据到设备</p>
           </div>
+        ) : (
+          /* 固件升级操作 */
+          <div className="flex gap-4">
+            {/* 步骤 1: 进入 IAP 模式 */}
+            <div className="space-y-2">
+              <Button onClick={handleEnterIAPMode} disabled={!canEnterIAP} variant="outline">
+                {status === "entering_upgrade_mode" || status === "entering_iap_mode"
+                  ? "进入中..."
+                  : "进入 IAP 模式"}
+              </Button>
+              <p className="text-xs text-muted-foreground">设备会断开重连</p>
+            </div>
 
-          {/* 步骤 2: 写入固件 */}
-          <div className="space-y-2">
-            <Button onClick={handleUploadFirmware} disabled={!canUpload}>
-              {status === "sending_firmware" || status === "finishing"
-                ? "写入中..."
-                : "写入固件"}
-            </Button>
-            <p className="text-xs text-muted-foreground">需先进入 IAP 模式</p>
+            {/* 步骤 2: 写入固件 */}
+            <div className="space-y-2">
+              <Button onClick={handleUploadFirmware} disabled={!canUpload}>
+                {status === "sending_firmware" || status === "finishing"
+                  ? "写入中..."
+                  : "写入固件"}
+              </Button>
+              <p className="text-xs text-muted-foreground">需先进入 IAP 模式</p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 状态显示 */}
         {status !== "idle" && (
@@ -195,7 +237,7 @@ export default function SoftwareUpgrade() {
             </div>
 
             {/* 进度条 */}
-            {status === "sending_firmware" && (
+            {(status === "sending_firmware" || status === "sending_cdrom_data") && (
               <div className="space-y-1">
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                   <div
