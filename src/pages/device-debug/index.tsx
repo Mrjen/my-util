@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -8,6 +9,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import * as commands from "./k12/k12_commond"
+import { LIGHT_BINDING_COMMANDS, buildLightBindingCommand } from "./k12/k12_commond"
+import { crc16GetValue } from "./utils/crc16"
 
 const commandOptions = [
   { label: "将第1个按键改为A键", value: "set_1_to_a" },
@@ -16,20 +19,45 @@ const commandOptions = [
   { label: "将第61个按键改为A键", value: "set_61_to_a" },
   { label: "重置键盘布局", value: "reset_keyboard_layout" },
   { label: "重置 FN1 层键盘布局", value: "reset_fn1_keyboard_layout" },
+  { label: "恢复出厂设置", value: "factory_reset" },
+  { label: "重置所有键程数据", value: "reset_all_key_travel" },
+  { label: "绑定 R1 灯光", value: "light_binding_r1" },
+  { label: "绑定 R2 灯光", value: "light_binding_r2" },
+  { label: "绑定 R3 灯光", value: "light_binding_r3" },
 ] as const
 
 type CommandKey = (typeof commandOptions)[number]["value"]
+
+function isLightBindingCommand(cmd: string): boolean {
+  return (LIGHT_BINDING_COMMANDS as readonly string[]).includes(cmd)
+}
+
+function parseLightValue(input: string): number | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+
+  let value: number
+  if (trimmed.toLowerCase().startsWith("0x")) {
+    value = parseInt(trimmed, 16)
+  } else {
+    value = parseInt(trimmed, 10)
+  }
+
+  if (Number.isNaN(value) || value < 0 || value > 255) {
+    return null
+  }
+  return value
+}
 
 interface ReportInfo {
   reportId: number
   type: "input" | "output" | "feature"
 }
 
-function parseHexString(hexString: string, length = 64): Uint8Array<ArrayBuffer> {
+function parseHexString(hexString: string, length = 64): Uint8Array {
   const hexValues = hexString.split(",").map((s) => s.trim())
   const bytes = hexValues.map((hex) => parseInt(hex, 16))
-  const buffer = new ArrayBuffer(length)
-  const view = new Uint8Array(buffer)
+  const view = new Uint8Array(length)
   view.set(bytes) // 剩余位置自动填充 0
   return view
 }
@@ -54,6 +82,14 @@ export default function DeviceDebug() {
   const [error, setError] = useState<string>("")
   const [selectedCommand, setSelectedCommand] = useState<CommandKey | "">("")
   const [sending, setSending] = useState(false)
+  const [lightValue, setLightValue] = useState<string>("")
+
+  const needsLightInput = Boolean(selectedCommand && isLightBindingCommand(selectedCommand))
+  const parsedLightValue = lightValue ? parseLightValue(lightValue) : null
+  const lightValueError =
+    needsLightInput && lightValue && parsedLightValue === null
+      ? "请输入有效的灯光数值 (0-255 或 0x00-0xFF)"
+      : ""
 
   const selectedDevice = selectedDeviceIndex >= 0 ? devices[selectedDeviceIndex] : null
   const availableReports = selectedDevice ? getDeviceReports(selectedDevice) : []
@@ -114,11 +150,38 @@ export default function DeviceDebug() {
   const handleSendCommand = async () => {
     if (!selectedDevice || !selectedCommand) return
 
+    // 对于灯光绑定指令，验证输入
+    if (isLightBindingCommand(selectedCommand)) {
+      if (parsedLightValue === null) {
+        setError("请输入有效的灯光数值")
+        return
+      }
+    }
+
     try {
       setSending(true)
       setError("")
-      const commandString = commands[selectedCommand]
-      const data = parseHexString(commandString)
+
+      let data: Uint8Array
+
+      if (isLightBindingCommand(selectedCommand) && parsedLightValue !== null) {
+        // 动态构建灯光绑定指令
+        const commandBytes = buildLightBindingCommand(selectedCommand, parsedLightValue)
+        const [crcHigh, crcLow] = crc16GetValue(commandBytes, commandBytes.length)
+        const fullCommand = [...commandBytes, parseInt(crcHigh, 16), parseInt(crcLow, 16)]
+
+        data = new Uint8Array(64)
+        data.set(fullCommand)
+
+        console.log(
+          "构建灯光绑定指令:",
+          fullCommand.map((b) => `0x${b.toString(16).toUpperCase().padStart(2, "0")}`).join(", "),
+        )
+      } else {
+        // 使用预定义的静态指令
+        const commandString = commands[selectedCommand as keyof typeof commands] as string
+        data = parseHexString(commandString)
+      }
 
       // 根据 report 类型调用不同的方法
       if (selectedReport.type === "feature") {
@@ -231,10 +294,13 @@ export default function DeviceDebug() {
 
               <div className="space-y-2">
                 <h2 className="font-semibold">发送指令</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-start">
                   <Select
                     value={selectedCommand}
-                    onValueChange={(value: string) => setSelectedCommand(value as CommandKey)}
+                    onValueChange={(value: string) => {
+                      setSelectedCommand(value as CommandKey)
+                      setLightValue("")
+                    }}
                   >
                     <SelectTrigger className="w-64">
                       <SelectValue placeholder="选择指令" />
@@ -247,7 +313,27 @@ export default function DeviceDebug() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button onClick={handleSendCommand} disabled={!selectedCommand || sending}>
+                  {needsLightInput && (
+                    <div className="flex flex-col gap-1">
+                      <Input
+                        className="w-32"
+                        placeholder="灯光值 (0-255)"
+                        value={lightValue}
+                        onChange={(e) => setLightValue(e.target.value)}
+                      />
+                      {lightValueError && (
+                        <span className="text-red-500 text-xs">{lightValueError}</span>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleSendCommand}
+                    disabled={
+                      !selectedCommand ||
+                      sending ||
+                      (needsLightInput && parsedLightValue === null)
+                    }
+                  >
                     {sending ? "发送中..." : "发送"}
                   </Button>
                 </div>

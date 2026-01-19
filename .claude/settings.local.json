@@ -3,7 +3,11 @@
     "allow": [
       "Bash(bun add:*)",
       "Bash(bun remove:*)",
-      "Bash(bun run build:*)"
+      "Bash(bun run build:*)",
+      "Bash(openspec list:*)",
+      "Bash(openspec validate:*)",
+      "Bash(openspec show:*)",
+      "Bash(openspec archive add-r1-r2-r3-light-binding:*)"
     ]
   }
 }

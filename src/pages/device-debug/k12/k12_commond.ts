@@ -17,3 +17,56 @@ export const reset_keyboard_layout = `0xA5, 0x5A, 0xFC, 0x2E, 0x02, 0x46, 0x01, 
 
 // 重置 FN1 层键盘布局
 export const reset_fn1_keyboard_layout = `0xA5, 0x5A, 0xFC, 0x2E, 0x02, 0x4F, 0x01, 0xFC, 0x5A, 0xA5, 0x1e, 0x4a`
+
+// 恢复出厂设置
+export const factory_reset = `0xA5, 0x5A, 0xFC, 0x2E, 0x02, 0x45, 0x01, 0xFC, 0x5A, 0xA5, 0x1F, 0xD2`
+
+// 重置所有键程数据
+export const reset_all_key_travel = `0xA5, 0x5A, 0xFC, 0x2E, 0x02, 0x48, 0x01, 0xFC, 0x5A, 0xA5, 0xDE, 0xFF`
+
+// R1/R2/R3 灯光绑定指令标识
+export const LIGHT_BINDING_R1 = "light_binding_r1"
+export const LIGHT_BINDING_R2 = "light_binding_r2"
+export const LIGHT_BINDING_R3 = "light_binding_r3"
+
+// 需要灯光数值输入的指令列表
+export const LIGHT_BINDING_COMMANDS = [
+  LIGHT_BINDING_R1,
+  LIGHT_BINDING_R2,
+  LIGHT_BINDING_R3,
+] as const
+
+// R 键编号映射
+const R_KEY_MAP: Record<string, number> = {
+  [LIGHT_BINDING_R1]: 0x01,
+  [LIGHT_BINDING_R2]: 0x02,
+  [LIGHT_BINDING_R3]: 0x03,
+}
+
+/**
+ * 构建 R1/R2/R3 灯光绑定指令
+ * @param commandKey 指令键名 (light_binding_r1/r2/r3)
+ * @param lightValue 灯光数值 (0x00-0xFF)
+ * @returns 完整的指令字节数组
+ */
+export function buildLightBindingCommand(commandKey: string, lightValue: number): number[] {
+  const rKey = R_KEY_MAP[commandKey]
+  if (rKey === undefined) {
+    throw new Error(`Invalid command key: ${commandKey}`)
+  }
+
+  // 构建指令 (不含 CRC)
+  const command = [
+    0xa5, 0x5a, // 数据帧头
+    0xfc, // 帧头标志
+    0x2e, // 数据类型
+    0x03, // 数据长度
+    0x6f, // 数据命令
+    rKey, // R 键编号
+    lightValue & 0xff, // 灯光数值
+    0xfc, // 帧尾标志
+    0x5a, 0xa5, // 数据帧尾
+  ]
+
+  return command
+}
