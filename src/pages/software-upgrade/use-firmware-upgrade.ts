@@ -336,7 +336,7 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
           await sendFeatureReport(selectedDevice, packet)
 
           // 每包发送后延迟 15ms
-          await delay(15)
+          await delay(5)
 
           // 尝试读取响应确认
           try {
