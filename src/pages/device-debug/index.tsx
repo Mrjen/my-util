@@ -184,6 +184,9 @@ export default function DeviceDebug() {
       }
 
       // 根据 report 类型调用不同的方法
+      // 确保 data 的 buffer 类型为 ArrayBuffer
+      const bufferSource = new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength)
+
       if (selectedReport.type === "feature") {
         console.log(
           "发送特征报告:",
@@ -192,9 +195,9 @@ export default function DeviceDebug() {
             .map((b) => `0x${b.toString(16).toUpperCase().padStart(2, "0")}`)
             .join(", "),
         )
-        await selectedDevice.sendFeatureReport(selectedReport.reportId, data)
+        await selectedDevice.sendFeatureReport(selectedReport.reportId, bufferSource)
       } else {
-        await selectedDevice.sendReport(selectedReport.reportId, data)
+        await selectedDevice.sendReport(selectedReport.reportId, bufferSource)
       }
     } catch (err) {
       if (err instanceof Error) {
