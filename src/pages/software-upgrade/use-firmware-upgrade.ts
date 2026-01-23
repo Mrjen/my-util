@@ -18,6 +18,12 @@ import {
   type UpgradeStatus,
 } from "./firmware-utils"
 
+interface InputReportData {
+  reportId: number
+  data: number[]
+  timestamp: Date
+}
+
 interface UseFirmwareUpgradeReturn {
   // 状态
   devices: HIDDevice[]
@@ -27,6 +33,7 @@ interface UseFirmwareUpgradeReturn {
   progress: number
   logs: LogEntry[]
   error: string | null
+  inputReports: InputReportData[]
 
   // 操作
   connectDevice: () => Promise<void>
@@ -36,6 +43,7 @@ interface UseFirmwareUpgradeReturn {
   uploadFirmware: (firmwareData: Uint8Array) => Promise<void>
   uploadCdrom: (cdromData: Uint8Array) => Promise<void>
   clearLogs: () => void
+  clearInputReports: () => void
 }
 
 // 检查设备是否支持指定的 Feature Report ID
@@ -63,8 +71,10 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
   const [progress, setProgress] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [inputReports, setInputReports] = useState<InputReportData[]>([])
 
   const abortRef = useRef(false)
+  const inputReportResolverRef = useRef<((report: InputReportData) => void) | null>(null)
 
   const selectedDevice = selectedDeviceIndex >= 0 ? devices[selectedDeviceIndex] : null
 
@@ -76,9 +86,79 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
     setLogs([])
   }, [])
 
+  const clearInputReports = useCallback(() => {
+    setInputReports([])
+  }, [])
+
+  // 处理设备输入报告
+  const handleInputReport = useCallback(
+    (event: HIDInputReportEvent) => {
+      const data = new Uint8Array(event.data.buffer)
+      const reportData: InputReportData = {
+        reportId: event.reportId,
+        data: Array.from(data),
+        timestamp: new Date(),
+      }
+
+      setInputReports((prev) => [...prev, reportData])
+
+      // 如果有等待中的 resolver，立即触发
+      if (inputReportResolverRef.current) {
+        inputReportResolverRef.current(reportData)
+        inputReportResolverRef.current = null
+      }
+
+      // 记录到日志
+      // const hexStr = Array.from(data.slice(0, 32))
+      //   .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      //   .join(" ")
+      // addLog(
+      //   "info",
+      //   `收到 Input Report (ID: ${event.reportId}): ${hexStr}${data.length > 32 ? "..." : ""}`,
+      // )
+
+      // 打印完整收到的数据
+      // const fullHexStr = Array.from(data)
+      //   .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      //   .join(" ")
+      // console.log(
+      //   `[接收] Input Report (ID: ${event.reportId}, 长度: ${data.length} 字节):`,
+      //   fullHexStr,
+      // )
+    },
+    [addLog],
+  )
+
+  // 等待输入报告（带超时）
+  const waitForInputReport = useCallback((timeoutMs: number): Promise<InputReportData> => {
+    return new Promise((resolve, reject) => {
+      // 设置超时
+      const timeoutId = setTimeout(() => {
+        inputReportResolverRef.current = null
+        reject(new Error(`等待设备响应超时 (${timeoutMs}ms)`))
+      }, timeoutMs)
+
+      // 设置 resolver
+      inputReportResolverRef.current = (report: InputReportData) => {
+        clearTimeout(timeoutId)
+        resolve(report)
+      }
+    })
+  }, [])
+
   // 发送 Feature Report
   const sendFeatureReport = async (dev: HIDDevice, data: number[]) => {
     const reportData = new Uint8Array(data)
+
+    // 打印完整发送的数据
+    // const hexStr = Array.from(reportData)
+    //   .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+    //   .join(" ")
+    // console.log(
+    //   `[发送] Feature Report (ID: ${SEND_REPORT_ID}, 长度: ${reportData.length} 字节):`,
+    //   hexStr,
+    // )
+
     await dev.sendFeatureReport(SEND_REPORT_ID, reportData)
   }
 
@@ -113,11 +193,13 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
         throw new Error("未选择设备")
       }
 
-      // 打开所有设备接口
+      // 打开所有设备接口并添加输入报告监听
       for (const dev of requestedDevices) {
         if (!dev.opened) {
           await dev.open()
         }
+        // 添加输入报告监听
+        dev.addEventListener("inputreport", handleInputReport)
       }
 
       setDevices(requestedDevices)
@@ -143,17 +225,20 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
         "success",
         `已连接: ${firstDev.productName || "未知设备"} (VID: ${firstDev.vendorId.toString(16).toUpperCase()}, PID: ${firstDev.productId.toString(16).toUpperCase()})`,
       )
+      addLog("info", "已启动输入报告监听")
     } catch (err) {
       const message = err instanceof Error ? err.message : "连接失败"
       setError(message)
       setStatus("idle")
       addLog("error", `连接失败: ${message}`)
     }
-  }, [addLog])
+  }, [addLog, handleInputReport])
 
   // 断开设备
   const disconnectDevice = useCallback(async () => {
     for (const dev of devices) {
+      // 移除输入报告监听
+      dev.removeEventListener("inputreport", handleInputReport)
       if (dev.opened) {
         await dev.close()
       }
@@ -161,8 +246,8 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
     setDevices([])
     setSelectedDeviceIndex(-1)
     setStatus("idle")
-    addLog("info", "设备已断开")
-  }, [devices, addLog])
+    addLog("info", "设备已断开，已停止输入报告监听")
+  }, [devices, addLog, handleInputReport])
 
   // 步骤1：进入 IAP 模式（设备会断开重连，用户需要手动重新连接）
   const enterIAPMode = useCallback(async () => {
@@ -289,6 +374,9 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
       setError(null)
       setProgress(0)
 
+      const MAX_RETRIES = 3
+      const RESPONSE_TIMEOUT = 5000 // 500ms 超时
+
       try {
         // 步骤1：发送 CD-ROM 总字节数
         setStatus("sending_cdrom_size")
@@ -296,80 +384,100 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
 
         const sizePacket = createCdromSizePacket(cdromData.length)
         await sendFeatureReport(selectedDevice, sizePacket)
-        addLog("info", "已发送 CD-ROM 文件大小")
+        addLog("info", "已发送 CD-ROM 文件大小，等待设备确认...")
 
-        // 等待 15ms 后读取响应
-        await delay(15)
+        // 等待设备响应确认文件大小
         try {
-          const response = await selectedDevice.receiveFeatureReport(SEND_REPORT_ID)
-          const responseData = new Uint8Array(response.buffer)
-          // 打印响应数据
-          const hexStr = Array.from(responseData.slice(0, 32))
-            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ")
-          addLog("info", `设备响应: ${hexStr}...`)
-          console.log("Response:", hexStr)
-
-          const parsed = parseCdromResponse(responseData)
+          const response = await waitForInputReport(RESPONSE_TIMEOUT)
+          const parsed = parseCdromResponse(new Uint8Array(response.data))
           if (parsed.isValid) {
             addLog("success", `设备已确认接收文件大小，包号: ${parsed.packetNumber}`)
           } else {
             addLog("warn", "设备响应格式异常，继续发送数据")
           }
-        } catch {
-          addLog("warn", "无法读取设备响应，继续发送数据")
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "等待响应失败"
+          addLog("error", `等待文件大小确认超时: ${message}`)
+          throw new Error("设备未确认文件大小，传输失败")
         }
 
-        // 步骤2：分包发送 CD-ROM 数据
+        // 步骤2：分包发送 CD-ROM 数据（带重试机制）
         setStatus("sending_cdrom_data")
         const cdromArray = Array.from(cdromData)
         const chunks = chunk(cdromArray, CDROM_CHUNK_SIZE)
-        addLog("info", `分块数量: ${chunks.length}`)
+        addLog("info", `分块数量: ${chunks.length}，启用发送-确认模式`)
 
-        for (let i = 0; i < chunks.length; i++) {
-          if (abortRef.current) {
-            throw new Error("升级已取消")
-          }
+        let retryCount = 0
 
-          const chunkData = chunks[i]
-          const packet = createCdromDataPacket(chunkData)
-          await sendFeatureReport(selectedDevice, packet)
-
-          // 每包发送后延迟 15ms
-          await delay(5)
-
-          // 尝试读取响应确认
+        while (retryCount <= MAX_RETRIES) {
           try {
-            const response = await selectedDevice.receiveFeatureReport(SEND_REPORT_ID)
-            const responseData = new Uint8Array(response.buffer)
-            const parsed = parseCdromResponse(responseData)
-
-            // 每 100 包打印一次响应日志
-            if ((i + 1) % 100 === 0 || i === 0) {
-              const hexStr = Array.from(responseData)
-                .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-                .join(" ")
-              addLog("info", `包 ${i + 1} 响应: ${hexStr}...`)
+            if (retryCount > 0) {
+              addLog("warn", `开始第 ${retryCount} 次重试，从第一包重新发送...`)
+              setProgress(0)
             }
 
-            if (parsed.isValid && parsed.packetNumber !== i + 1) {
-              addLog("warn", `包号不匹配: 期望 ${i + 1}, 实际 ${parsed.packetNumber}`)
+            // 发送所有包
+            for (let i = 0; i < chunks.length; i++) {
+              if (abortRef.current) {
+                throw new Error("升级已取消")
+              }
+
+              const chunkData = chunks[i]
+              const packet = createCdromDataPacket(chunkData)
+
+              // 发送包
+              await sendFeatureReport(selectedDevice, packet)
+
+              // 等待设备响应
+              try {
+                const response = await waitForInputReport(RESPONSE_TIMEOUT)
+                const responseData = new Uint8Array(response.data)
+                const parsed = parseCdromResponse(responseData)
+
+                // 每 100 包打印一次响应日志
+                if ((i + 1) % 100 === 0 || i === 0 || i === chunks.length - 1) {
+                  // const hexStr = Array.from(responseData.slice(0, 32))
+                  //   .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+                  //   .join(" ")
+                  // addLog(
+                  //   "info",
+                  //   `包 ${i + 1}/${chunks.length} 已确认: ${hexStr}${responseData.length > 32 ? "..." : ""}`,
+                  // )
+                }
+
+                // 验证包号
+                if (parsed.isValid && parsed.packetNumber !== i + 1) {
+                  addLog("error", `包号不匹配: 期望 ${i + 1}, 实际 ${parsed.packetNumber}`)
+                  throw new Error(`包号不匹配: 期望 ${i + 1}, 实际 ${parsed.packetNumber}`)
+                }
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "等待响应超时"
+                addLog("error", `包 ${i + 1} 传输失败: ${message}`)
+                throw err // 抛出错误，触发重试
+              }
+
+              // 更新进度
+              const progressValue = Math.round(((i + 1) / chunks.length) * 100)
+              setProgress(progressValue)
+
+              // if ((i + 1) % 100 === 0 || i === chunks.length - 1) {
+              //   addLog("info", `发送进度: ${i + 1}/${chunks.length} (${progressValue}%)`)
+              // }
             }
+
+            // 所有包发送成功，跳出重试循环
+            addLog("success", "CD-ROM 数据发送完成")
+            setStatus("success")
+            addLog("success", "CD-ROM 升级成功完成！")
+            return
           } catch {
-            // 读取响应失败，继续发送（降级模式）
-          }
-
-          const progressValue = Math.round(((i + 1) / chunks.length) * 100)
-          setProgress(progressValue)
-
-          if ((i + 1) % 100 === 0 || i === chunks.length - 1) {
-            addLog("info", `发送进度: ${i + 1}/${chunks.length} (${progressValue}%)`)
+            retryCount++
+            if (retryCount > MAX_RETRIES) {
+              throw new Error(`传输失败，已重试 ${MAX_RETRIES} 次`)
+            }
+            // 继续下一次重试
           }
         }
-
-        addLog("success", "CD-ROM 数据发送完成")
-        setStatus("success")
-        addLog("success", "CD-ROM 升级成功完成！")
       } catch (err) {
         const message = err instanceof Error ? err.message : "CD-ROM 升级失败"
         setError(message)
@@ -377,7 +485,7 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
         addLog("error", `CD-ROM 升级失败: ${message}`)
       }
     },
-    [selectedDevice, addLog],
+    [selectedDevice, addLog, waitForInputReport],
   )
 
   return {
@@ -388,6 +496,7 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
     progress,
     logs,
     error,
+    inputReports,
     connectDevice,
     disconnectDevice,
     selectDevice,
@@ -395,5 +504,6 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
     uploadFirmware,
     uploadCdrom,
     clearLogs,
+    clearInputReports,
   }
 }
