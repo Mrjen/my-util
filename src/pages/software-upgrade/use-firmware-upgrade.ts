@@ -378,31 +378,8 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
       const RESPONSE_TIMEOUT = 5000 // 500ms 超时
 
       try {
-        // 步骤1：发送 CD-ROM 总字节数
-        setStatus("sending_cdrom_size")
         addLog("info", `CD-ROM 文件大小: ${cdromData.length} 字节`)
 
-        const sizePacket = createCdromSizePacket(cdromData.length)
-        await sendFeatureReport(selectedDevice, sizePacket)
-        addLog("info", "已发送 CD-ROM 文件大小，等待设备确认...")
-
-        // 等待设备响应确认文件大小
-        try {
-          const response = await waitForInputReport(RESPONSE_TIMEOUT)
-          const parsed = parseCdromResponse(new Uint8Array(response.data))
-          if (parsed.isValid) {
-            addLog("success", `设备已确认接收文件大小，包号: ${parsed.packetNumber}`)
-          } else {
-            addLog("warn", "设备响应格式异常，继续发送数据")
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "等待响应失败"
-          addLog("error", `等待文件大小确认超时: ${message}`)
-          throw new Error("设备未确认文件大小，传输失败")
-        }
-
-        // 步骤2：分包发送 CD-ROM 数据（带重试机制）
-        setStatus("sending_cdrom_data")
         const cdromArray = Array.from(cdromData)
         const chunks = chunk(cdromArray, CDROM_CHUNK_SIZE)
         addLog("info", `分块数量: ${chunks.length}，启用发送-确认模式`)
@@ -412,9 +389,27 @@ export function useFirmwareUpgrade(): UseFirmwareUpgradeReturn {
         while (retryCount <= MAX_RETRIES) {
           try {
             if (retryCount > 0) {
-              addLog("warn", `开始第 ${retryCount} 次重试，从第一包重新发送...`)
+              addLog("warn", `开始第 ${retryCount} 次重试，从文件大小确认开始...`)
               setProgress(0)
             }
+
+            // 步骤1：发送 CD-ROM 总字节数
+            setStatus("sending_cdrom_size")
+            const sizePacket = createCdromSizePacket(cdromData.length)
+            await sendFeatureReport(selectedDevice, sizePacket)
+            addLog("info", "已发送 CD-ROM 文件大小，等待设备确认...")
+
+            // 等待设备响应确认文件大小
+            const sizeResponse = await waitForInputReport(RESPONSE_TIMEOUT)
+            const sizeParsed = parseCdromResponse(new Uint8Array(sizeResponse.data))
+            if (sizeParsed.isValid) {
+              addLog("success", `设备已确认接收文件大小，包号: ${sizeParsed.packetNumber}`)
+            } else {
+              addLog("warn", "设备响应格式异常，继续发送数据")
+            }
+
+            // 步骤2：分包发送 CD-ROM 数据
+            setStatus("sending_cdrom_data")
 
             // 发送所有包
             for (let i = 0; i < chunks.length; i++) {
